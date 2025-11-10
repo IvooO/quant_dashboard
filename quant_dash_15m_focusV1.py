@@ -121,7 +121,9 @@ def calculate_macd(df, fast=12, slow=26, signal=9):
         'Hold'
     )
     # The current bar's status is simply based on position (MACD > Signal Line)
-    df.loc[df.index[-1], 'MACD_Signal_Status'] = np.where(
+    # Use .iloc[-1] to safely target the last row by integer position
+    last_idx = df.index[-1]
+    df.loc[last_idx, 'MACD_Signal_Status'] = np.where(
         df['MACD'].iloc[-1] > df['Signal_Line'].iloc[-1], 
         'Buy Momentum', 
         'Sell Momentum'
@@ -184,7 +186,16 @@ def get_mtf_signals(df_history, v_imb_threshold, interval):
     
     # IMPORTANT: MACD must be calculated on ascending data
     df_mtf = df_mtf.sort_index(ascending=True).rename(columns={'close': 'close'})
-    df_mtf = calculate_macd(df_mtf)
+    
+    # Ensure there's enough data for MACD
+    if len(df_mtf) > 26: # 26 is the slow period
+        df_mtf = calculate_macd(df_mtf)
+    else:
+        # Not enough data, fill with NaNs or defaults
+        df_mtf['MACD'] = 0.0
+        df_mtf['Signal_Line'] = 0.0
+        df_mtf['MACD_Signal_Status'] = 'N/A'
+
 
     # Final preparation: Reset index and sort descending for UI display
     df_mtf = df_mtf.reset_index().rename(columns={'Time': 'Close Time'})
@@ -274,7 +285,7 @@ df_1h = get_mtf_signals(df_live, v_imb_threshold, interval=MTF_INTERVAL_1H)
 st.session_state.df_15m_signals = df_15m
 st.session_state.df_1h_signals = df_1h
 
-if not df_live.empty and not df_15m.empty:
+if not df_live.empty and not df_15m.empty and len(df_15m) > 0 and len(df_1h) > 0:
     
     # Get the latest 15M signal metrics (for Key Metrics - this is the OPEN bar)
     latest_15m = df_15m.iloc[0]
@@ -521,4 +532,3 @@ else:
 time.sleep(update_interval)
 st.session_state.last_fetch_time = datetime.now()
 st.rerun()
-I've made sure to include the complete and runnable code above. Please let me know if you are now able to see the text and if you need any adjustments to the dashboard logic!
