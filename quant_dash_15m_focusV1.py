@@ -10,16 +10,15 @@ from datetime import datetime, timedelta
 # --- 1. CONFIGURATION AND INITIALIZATION ---
 
 st.set_page_config(
-    page_title="RenTech BTC Dashboard (V-Imb + MACD)",
+    page_title="MTF Signal Confluence Monitor", # Updated Name
     page_icon="⏱️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- EXCHANGE CONFIGURATION (Updated to Kraken for reliability) ---
-EXCHANGE_ID = 'kraken' # Changed from binance
-SYMBOL = 'BTC/USD'     # Standardized symbol for Kraken spot market
-# Max history for raw trades - set high enough (20000) to ensure deep history for 1H/MACD calculation
+# --- EXCHANGE CONFIGURATION (Using Kraken for reliability) ---
+EXCHANGE_ID = 'kraken' 
+SYMBOL = 'BTC/USD'     
 MAX_TICKS_HISTORY = 20000 
 MTF_INTERVAL_15M = '15T'
 MTF_INTERVAL_1H = '1H'
@@ -120,6 +119,7 @@ def calculate_macd(df, fast=12, slow=26, signal=9):
         np.where(df['MACD_Cross'] == 1, 'Buy Crossover', 'Sell Crossover'),
         'Hold'
     )
+    
     # The current bar's status is simply based on position (MACD > Signal Line)
     # Use .iloc[-1] to safely target the last row by integer position
     last_idx = df.index[-1]
@@ -230,7 +230,6 @@ def display_signal_table(col, df, interval, max_rows):
         if 'Buy Crossover' in val: return 'background-color: rgba(0, 255, 255, 0.2); font-weight: bold;'
         if 'Sell Crossover' in val: return 'background-color: rgba(255, 105, 180, 0.2); font-weight: bold;'
         if 'Hold' in val: return 'background-color: rgba(128, 128, 128, 0.1);'
-        # For the open bar (which is skipped here, but for completeness)
         return ''
         
     col.dataframe(
@@ -257,8 +256,8 @@ def display_signal_table(col, df, interval, max_rows):
 
 # --- 4. STREAMLIT UI EXECUTION ---
 
-st.title(f"📈 {EXCHANGE_ID.upper()} BTC Dashboard: V-Imb (Trigger) + MACD (Momentum)")
-st.markdown(f"### Primary Focus: {MTF_INTERVAL_15M} for Execution (Current Bar), {MTF_INTERVAL_1H} for Confirmation")
+st.title(f"📈 {EXCHANGE_ID.upper()} Flow & Momentum Confluence Monitor") # Updated Title
+st.markdown(f"### Multi-Factor Signal Analysis: {MTF_INTERVAL_15M} (Execution) & {MTF_INTERVAL_1H} (Confirmation)") # Updated Subtitle
 
 # --- Sidebar Controls ---
 with st.sidebar:
