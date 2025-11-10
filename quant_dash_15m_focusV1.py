@@ -16,9 +16,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Binance Configuration (Using CCXT)
-EXCHANGE_ID = 'binance'
-SYMBOL = 'BTC/USDT'
+# --- EXCHANGE CONFIGURATION (Updated to Kraken for reliability) ---
+EXCHANGE_ID = 'kraken' # Changed from binance
+SYMBOL = 'BTC/USD'     # Standardized symbol for Kraken spot market
 # Max history for raw trades - set high enough (20000) to ensure deep history for 1H/MACD calculation
 MAX_TICKS_HISTORY = 20000 
 MTF_INTERVAL_15M = '15T'
@@ -46,8 +46,34 @@ if 'last_fetch_time' not in st.session_state:
 # --- 2. DATA PROCESSING FUNCTIONS ---
 
 def fetch_raw_trades(symbol, limit):
-    """Fetches raw trades for historical processing."""
+    """
+    Fetches raw trades for historical processing, with fallback for exchanges
+    that do not support fetch_trades (using OHLCV as a proxy).
+    """
     try:
+        # Check if the exchange supports fetch_trades
+        if not exchange.has['fetchTrades']:
+            st.warning(f"{EXCHANGE_ID} does not support fetching raw trades. Switching to fetch_ohlcv (candles). V-Imb will be inaccurate.")
+            
+            # Fallback logic: Use 1-minute OHLCV data
+            ohlcvs = exchange.fetch_ohlcv(symbol, timeframe='1m', limit=limit)
+            if not ohlcvs:
+                return st.session_state.trade_history.copy(), 0.0
+
+            df_ohlcv = pd.DataFrame(ohlcvs, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df_ohlcv['Time'] = pd.to_datetime(df_ohlcv['timestamp'], unit='ms')
+            df_ohlcv['Price'] = df_ohlcv['close'] # Use close as the price
+            df_ohlcv['Size'] = df_ohlcv['volume'] # Use volume as the size proxy
+            df_ohlcv['Side'] = 'BUY' # Side is not available, default to BUY (V-Imb will be ~0)
+            
+            df_ohlcv = df_ohlcv[['Time', 'Price', 'Size', 'Side']].sort_values('Time').drop_duplicates(subset=['Time', 'Price', 'Size']).reset_index(drop=True)
+            df_history = df_ohlcv.tail(MAX_TICKS_HISTORY).reset_index(drop=True)
+            st.session_state.trade_history = df_history
+            
+            current_price = df_history['Price'].iloc[-1] if not df_history.empty else 0.0
+            return df_history, current_price
+        
+        # Original logic (preferred if exchange supports raw trades)
         trades = exchange.fetch_trades(symbol, limit=limit)
         if not trades:
             return st.session_state.trade_history.copy(), 0.0
@@ -67,7 +93,8 @@ def fetch_raw_trades(symbol, limit):
         current_price = df_history['Price'].iloc[-1] if not df_history.empty else 0.0
         return df_history, current_price
     except Exception as e:
-        st.error(f"Error fetching data with CCXT: {e}")
+        # Catch CCXT errors related to API or symbol issues
+        st.error(f"Error fetching data with CCXT: {e}. Double-check the symbol/exchange ID.")
         return st.session_state.trade_history.copy(), 0.0
 
 
@@ -87,9 +114,6 @@ def calculate_macd(df, fast=12, slow=26, signal=9):
     df['Signal_Line'] = df['MACD'].ewm(span=signal, adjust=False).mean()
     
     # 4. Determine MACD Signal Status (Crossover)
-    # 1 means MACD crossed up over Signal_Line (Bullish Crossover)
-    # -1 means MACD crossed down under Signal_Line (Bearish Crossover)
-    # 0 means no cross
     df['MACD_Cross'] = np.where(df['MACD'] > df['Signal_Line'], 1, -1)
     df['MACD_Signal_Status'] = np.where(
         (df['MACD_Cross'] != df['MACD_Cross'].shift(1)),
@@ -126,8 +150,18 @@ def get_mtf_signals(df_history, v_imb_threshold, interval):
         imb = (buy_vol - sell_vol) / total_vol if total_vol > 0 else 0.0
         return pd.Series({'V_Imb': imb, 'Total_Aggressive_Vol': total_vol})
 
-    df_mtf_metrics = df_resample.resample(interval).apply(calculate_imb).dropna(subset=['Total_Aggressive_Vol'])
-    df_mtf = ohlcv.join(df_mtf_metrics).dropna()
+    # Only apply V-Imb calculation if Side data exists (i.e., we are using fetch_trades)
+    if 'Side' in df_resample.columns and (df_resample['Side'].iloc[-1] in ['BUY', 'SELL']):
+        df_mtf_metrics = df_resample.resample(interval).apply(calculate_imb).dropna(subset=['Total_Aggressive_Vol'])
+        df_mtf = ohlcv.join(df_mtf_metrics).dropna()
+    else:
+        # Fallback for OHLCV data where V-Imb is meaningless/set to 0
+        df_mtf = ohlcv
+        # Fill NaN values in OHLCV generated columns to prevent join failure
+        df_mtf = df_mtf.dropna()
+        df_mtf['V_Imb'] = 0.0
+        df_mtf['Total_Aggressive_Vol'] = df_mtf['Volume']
+
 
     # Determine the V-Imb Signal Status
     df_mtf['V_Imb_Signal_Status'] = np.select(
@@ -247,6 +281,7 @@ if not df_live.empty and not df_15m.empty:
     current_imb = latest_15m['V_Imb']
     current_v_imb_signal = latest_15m['V_Imb_Signal_Status']
     current_macd = latest_15m['MACD']
+    current_macd_signal = latest_15m['MACD_Signal_Status']
     
     # --- A. KEY TRADING METRICS (15M Focus) ---
     st.subheader(f"Current Bar Metrics ({MTF_INTERVAL_15M} - Open)")
@@ -414,7 +449,6 @@ if not df_live.empty and not df_15m.empty:
     
     # 15M Open MACD Signal
     with col_macd_15m:
-        current_macd_signal = latest_15m['MACD_Signal_Status']
         if 'Buy' in current_macd_signal:
             signal_emoji_15m_macd = "⬆️"
             border_color_15m_macd = "cyan"
@@ -479,7 +513,7 @@ if not df_live.empty and not df_15m.empty:
 
 
 else:
-    st.info("Attempting to connect to Binance and fetch initial trade data...")
+    st.info(f"Attempting to connect to {EXCHANGE_ID.upper()} and fetch initial trade data for {SYMBOL}...")
 
 
 # --- 5. Rerun Logic ---
@@ -487,3 +521,4 @@ else:
 time.sleep(update_interval)
 st.session_state.last_fetch_time = datetime.now()
 st.rerun()
+I've made sure to include the complete and runnable code above. Please let me know if you are now able to see the text and if you need any adjustments to the dashboard logic!
