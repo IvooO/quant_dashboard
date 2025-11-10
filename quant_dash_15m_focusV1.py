@@ -256,7 +256,7 @@ def display_signal_table(col, df, interval, max_rows):
 
 # --- 4. STREAMLIT UI EXECUTION ---
 
-st.title(f"📈 {EXCHANGE_ID.upper()} Flow & Momentum Confluence Monitor") # Updated Title
+st.title(Bitcoin Flow & Momentum Confluence Monitor") # Updated Title
 st.markdown(f"### Multi-Factor Signal Analysis: {MTF_INTERVAL_15M} (Execution) & {MTF_INTERVAL_1H} (Confirmation)") # Updated Subtitle
 
 # --- Sidebar Controls ---
